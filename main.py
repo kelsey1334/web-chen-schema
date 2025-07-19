@@ -11,13 +11,13 @@ from urllib.parse import urlparse
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
 
-# Load env
 load_dotenv()
 USER = os.getenv("USER", "admin")
 PASS = os.getenv("PASS", "admin")
 SECRET_KEY = os.getenv("SECRET_KEY", "changeme")
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs("static", exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 app = FastAPI()
@@ -115,6 +115,7 @@ def update_schema(item_id, script_schema, type_, account):
     script_schema = script_schema.strip() if script_schema else ""
     if type_ in ["post", "page"]:
         api_endpoint = f"{account['WP_API_URL']}/wp-json/wp/v2/{type_}s/{item_id}"
+
         if script_schema == "":
             payload = {
                 "meta": {
@@ -131,6 +132,7 @@ def update_schema(item_id, script_schema, type_, account):
                 new_schema = (old_schema.rstrip() + "\n" + script_schema)
             else:
                 new_schema = script_schema
+
             payload = {
                 "meta": {
                     "_inpost_head_script": {
@@ -138,6 +140,7 @@ def update_schema(item_id, script_schema, type_, account):
                     }
                 }
             }
+
         resp = requests.patch(api_endpoint, json=payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
         if resp.status_code == 200:
             return True, None
@@ -155,16 +158,19 @@ def update_schema(item_id, script_schema, type_, account):
         if get_resp.status_code == 200:
             data = get_resp.json()
             html_description = data.get("description", "")
+
         payload = {
             "meta": {
                 "category_schema": script_schema
             }
         }
         patch_resp = requests.patch(api_endpoint, json=payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
+
         fix_payload = {
             "description": html_description
         }
         fix_resp = requests.patch(api_endpoint, json=fix_payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
+
         if patch_resp.status_code == 200:
             return True, None
         else:
@@ -272,8 +278,9 @@ async def do_upload(request: Request, action: str = Form(...), file: UploadFile 
         "upload.html", {"request": request, "logs": logs, "file_url": file_url}
     )
 
-# ========== MAIN FOR RAILWAY ==========
+# ========== END ==========
+
+# Chạy uvicorn khi chạy python main.py
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
