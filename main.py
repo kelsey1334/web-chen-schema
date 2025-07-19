@@ -293,6 +293,25 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
         return RedirectResponse("/upload", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": "Sai tài khoản hoặc mật khẩu"})
 
+@app.get("/", response_class=HTMLResponse)
+def home(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/login")
+    return RedirectResponse("/dashboard")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/login")
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+@app.post("/login", response_class=HTMLResponse)
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username == USER and password == PASS:
+        request.session["user"] = username
+        return RedirectResponse("/dashboard", status_code=302)
+    return templates.TemplateResponse("login.html", {"request": request, "error": "Sai tài khoản hoặc mật khẩu"})
+
 @app.get("/logout", response_class=HTMLResponse)
 def logout(request: Request):
     request.session.clear()
