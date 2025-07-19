@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import requests
 from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
+import uuid
 
 load_dotenv()
 USER = os.getenv("USER", "admin")
@@ -17,14 +18,15 @@ PASS = os.getenv("PASS", "admin")
 SECRET_KEY = os.getenv("SECRET_KEY", "changeme")
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs("static", exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ====== Helper functions ======
+# Bộ nhớ tạm upload: task_id -> data
+TASKS = {}
+
 def read_accounts_and_data(file_path):
     xls = pd.ExcelFile(file_path)
     sheet_names = [s.lower() for s in xls.sheet_names]
@@ -34,12 +36,10 @@ def read_accounts_and_data(file_path):
         accounts_df = pd.read_excel(xls, sheet_name=[n for n in xls.sheet_names if n.lower() == 'account'][0])
     else:
         raise Exception("Không tìm thấy sheet 'accounts' hoặc 'account' trong file.")
-
     if 'data' in sheet_names:
         data_df = pd.read_excel(xls, sheet_name=[n for n in xls.sheet_names if n.lower() == 'data'][0])
     else:
         raise Exception("Không tìm thấy sheet 'data' trong file.")
-
     return accounts_df, data_df
 
 def get_account_dict(accounts_df):
@@ -115,15 +115,8 @@ def update_schema(item_id, script_schema, type_, account):
     script_schema = script_schema.strip() if script_schema else ""
     if type_ in ["post", "page"]:
         api_endpoint = f"{account['WP_API_URL']}/wp-json/wp/v2/{type_}s/{item_id}"
-
         if script_schema == "":
-            payload = {
-                "meta": {
-                    "_inpost_head_script": {
-                        "synth_header_script": ""
-                    }
-                }
-            }
+            payload = {"meta": {"_inpost_head_script": {"synth_header_script": ""}}}
         else:
             old_schema = get_current_schema(item_id, type_, account)
             if old_schema and script_schema in old_schema:
@@ -132,15 +125,7 @@ def update_schema(item_id, script_schema, type_, account):
                 new_schema = (old_schema.rstrip() + "\n" + script_schema)
             else:
                 new_schema = script_schema
-
-            payload = {
-                "meta": {
-                    "_inpost_head_script": {
-                        "synth_header_script": new_schema
-                    }
-                }
-            }
-
+            payload = {"meta": {"_inpost_head_script": {"synth_header_script": new_schema}}}
         resp = requests.patch(api_endpoint, json=payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
         if resp.status_code == 200:
             return True, None
@@ -150,7 +135,6 @@ def update_schema(item_id, script_schema, type_, account):
             except Exception:
                 error_detail = resp.text
             return False, error_detail
-
     elif type_ == "category":
         api_endpoint = f"{account['WP_API_URL']}/wp-json/wp/v2/categories/{item_id}"
         get_resp = requests.get(api_endpoint, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
@@ -158,19 +142,10 @@ def update_schema(item_id, script_schema, type_, account):
         if get_resp.status_code == 200:
             data = get_resp.json()
             html_description = data.get("description", "")
-
-        payload = {
-            "meta": {
-                "category_schema": script_schema
-            }
-        }
+        payload = {"meta": {"category_schema": script_schema}}
         patch_resp = requests.patch(api_endpoint, json=payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
-
-        fix_payload = {
-            "description": html_description
-        }
+        fix_payload = {"description": html_description}
         fix_resp = requests.patch(api_endpoint, json=fix_payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
-
         if patch_resp.status_code == 200:
             return True, None
         else:
@@ -179,60 +154,11 @@ def update_schema(item_id, script_schema, type_, account):
             except Exception:
                 error_detail = patch_resp.text
             return False, error_detail
-
     else:
         return False, f"Loại '{type_}' không hỗ trợ"
 
-def process_excel_multi_account(file_path, action="chencode"):
-    logs = []
-    delete_mode = (action == "xoascript")
-    try:
-        accounts_df, data_df = read_accounts_and_data(file_path)
-        accounts_dict = get_account_dict(accounts_df)
-        require_cols = {'url', 'type', 'site'} if delete_mode else {'url', 'script_schema', 'type', 'site'}
-        if not require_cols.issubset(data_df.columns):
-            return [f"File không đúng định dạng. Sheet 'data' phải có cột: {require_cols}"], None
-
-        results = []
-        for idx, row in data_df.iterrows():
-            url = row['url']
-            type_ = row['type'].strip().lower()
-            site = str(row['site']).strip().lower()
-            schema = "" if delete_mode else row.get('script_schema', '')
-            account = accounts_dict.get(site)
-            if not account:
-                msg = f"🚫❌ [{idx+1}] Không tìm thấy tài khoản cho site: {site}"
-                logs.append(msg)
-                results.append({"stt": idx+1, "url": url, "site": site, "type": type_, "result": "Không tìm thấy tài khoản"})
-                continue
-
-            item_id = get_id_from_url(url, type_, account)
-            if not item_id:
-                msg = f"🚫❌ [{idx+1}] Không tìm thấy ID cho URL: {url} (loại: {type_}, site: {site})"
-                logs.append(msg)
-                results.append({"stt": idx+1, "url": url, "site": site, "type": type_, "result": "Không tìm thấy ID"})
-                continue
-            ok, detail = update_schema(item_id, schema, type_, account)
-            if ok:
-                action_text = "Xoá" if delete_mode else "Cập nhật"
-                msg = f"✨✅ [{idx+1}] {action_text} schema cho {type_} ID {item_id} thành công (site: {site})"
-                result = "Thành công"
-            else:
-                msg = f"🚫❌ [{idx+1}] Lỗi khi {('xoá' if delete_mode else 'cập nhật')} schema cho {type_} ID {item_id} (site: {site})"
-                result = f"Lỗi: {detail}"
-                logs.append(f"💥⚠️ [{idx+1}] Chi tiết lỗi: {detail}")
-            logs.append(msg)
-            results.append({"stt": idx+1, "url": url, "site": site, "type": type_, "result": result})
-
-        # Kết quả xuất file Excel
-        df_result = pd.DataFrame(results)
-        out_file = os.path.join(UPLOAD_DIR, f"result_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx")
-        df_result.to_excel(out_file, index=False)
-        return logs, out_file
-    except Exception as e:
-        return [f"🚫❌ Lỗi khi xử lý: {e}"], None
-
 # ========== ROUTES ==========
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if not request.session.get("user"):
@@ -259,28 +185,67 @@ def logout(request: Request):
 def upload_page(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    return templates.TemplateResponse("upload.html", {"request": request, "logs": None, "file_url": None})
+    return templates.TemplateResponse("upload.html", {"request": request, "table": None, "task_id": None})
 
 @app.post("/upload", response_class=HTMLResponse)
-async def do_upload(request: Request, action: str = Form(...), file: UploadFile = File(...)):
+async def do_upload(request: Request, file: UploadFile = File(...)):
     if not request.session.get("user"):
         return RedirectResponse("/login")
     temp_file = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}")
     with open(temp_file, "wb") as f:
         f.write(await file.read())
-    logs, out_file = process_excel_multi_account(temp_file, action=action)
-    file_url = f"/static/{os.path.basename(out_file)}" if out_file else None
-    # Copy file to static dir for download
-    if out_file:
-        import shutil
-        shutil.copy(out_file, os.path.join("static", os.path.basename(out_file)))
+    # Đọc dữ liệu bảng trước, chưa xử lý
+    accounts_df, data_df = read_accounts_and_data(temp_file)
+    # Bổ sung status ban đầu
+    data_df['status'] = '⏳ Chưa xử lý'
+    task_id = str(uuid.uuid4())
+    TASKS[task_id] = {"file": temp_file, "data": data_df, "accounts": accounts_df}
+    table = data_df.fillna("").to_dict(orient='records')
     return templates.TemplateResponse(
-        "upload.html", {"request": request, "logs": logs, "file_url": file_url}
+        "upload.html", {"request": request, "table": table, "task_id": task_id}
     )
 
-# ========== END ==========
+@app.post("/run-task", response_class=JSONResponse)
+async def run_task(request: Request, task_id: str = Form(...), action: str = Form(...)):
+    if not request.session.get("user"):
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    if task_id not in TASKS:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+    # Xử lý từng dòng, trả log từng dòng
+    data_df = TASKS[task_id]["data"]
+    accounts_df = TASKS[task_id]["accounts"]
+    accounts_dict = get_account_dict(accounts_df)
+    logs = []
+    result_table = []
+    for idx, row in data_df.iterrows():
+        url = row['url']
+        type_ = row['type'].strip().lower()
+        site = str(row['site']).strip().lower()
+        schema = "" if action == "xoascript" else row.get('script_schema', '')
+        account = accounts_dict.get(site)
+        if not account:
+            status = "❌ Không tìm thấy tài khoản"
+            logs.append(status)
+            result_table.append({**row, "status": status})
+            continue
+        item_id = get_id_from_url(url, type_, account)
+        if not item_id:
+            status = "❌ Không tìm thấy ID"
+            logs.append(status)
+            result_table.append({**row, "status": status})
+            continue
+        ok, detail = update_schema(item_id, schema, type_, account)
+        if ok:
+            status = "✅ Thành công"
+        else:
+            status = f"❌ Lỗi: {detail}"
+        logs.append(status)
+        result_table.append({**row, "status": status})
+        # Cập nhật luôn vào bảng để gửi lại
+        data_df.at[idx, 'status'] = status
+    # Trả lại bảng mới cho client
+    TASKS[task_id]["data"] = data_df
+    table = data_df.fillna("").to_dict(orient='records')
+    return JSONResponse({"logs": logs, "table": table})
 
-# Chạy uvicorn khi chạy python main.py
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
+# ========== END ==========
