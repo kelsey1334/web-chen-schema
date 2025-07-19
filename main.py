@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
 
+# Load env
 load_dotenv()
 USER = os.getenv("USER", "admin")
 PASS = os.getenv("PASS", "admin")
@@ -23,7 +24,7 @@ app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ====== Helper functions copy nguyên từ code Telegram ======
+# ====== Helper functions ======
 def read_accounts_and_data(file_path):
     xls = pd.ExcelFile(file_path)
     sheet_names = [s.lower() for s in xls.sheet_names]
@@ -114,7 +115,6 @@ def update_schema(item_id, script_schema, type_, account):
     script_schema = script_schema.strip() if script_schema else ""
     if type_ in ["post", "page"]:
         api_endpoint = f"{account['WP_API_URL']}/wp-json/wp/v2/{type_}s/{item_id}"
-
         if script_schema == "":
             payload = {
                 "meta": {
@@ -131,7 +131,6 @@ def update_schema(item_id, script_schema, type_, account):
                 new_schema = (old_schema.rstrip() + "\n" + script_schema)
             else:
                 new_schema = script_schema
-
             payload = {
                 "meta": {
                     "_inpost_head_script": {
@@ -139,7 +138,6 @@ def update_schema(item_id, script_schema, type_, account):
                     }
                 }
             }
-
         resp = requests.patch(api_endpoint, json=payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
         if resp.status_code == 200:
             return True, None
@@ -157,19 +155,16 @@ def update_schema(item_id, script_schema, type_, account):
         if get_resp.status_code == 200:
             data = get_resp.json()
             html_description = data.get("description", "")
-
         payload = {
             "meta": {
                 "category_schema": script_schema
             }
         }
         patch_resp = requests.patch(api_endpoint, json=payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
-
         fix_payload = {
             "description": html_description
         }
         fix_resp = requests.patch(api_endpoint, json=fix_payload, auth=HTTPBasicAuth(account['WP_USER'], account['WP_APP_PASS']), verify=False)
-
         if patch_resp.status_code == 200:
             return True, None
         else:
@@ -190,7 +185,7 @@ def process_excel_multi_account(file_path, action="chencode"):
         accounts_dict = get_account_dict(accounts_df)
         require_cols = {'url', 'type', 'site'} if delete_mode else {'url', 'script_schema', 'type', 'site'}
         if not require_cols.issubset(data_df.columns):
-            return [f"File không đúng định dạng. Sheet 'data' phải có cột: {require_cols}"]
+            return [f"File không đúng định dạng. Sheet 'data' phải có cột: {require_cols}"], None
 
         results = []
         for idx, row in data_df.iterrows():
@@ -277,4 +272,8 @@ async def do_upload(request: Request, action: str = Form(...), file: UploadFile 
         "upload.html", {"request": request, "logs": logs, "file_url": file_url}
     )
 
-# ========== END ==========
+# ========== MAIN FOR RAILWAY ==========
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
