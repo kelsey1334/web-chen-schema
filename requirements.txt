@@ -8,3 +8,4 @@ aiofiles
 python-multipart
 itsdangerous
 jinja2
+starlette
