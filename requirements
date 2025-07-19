@@ -1,8 +1,8 @@
 fastapi
 uvicorn
-python-multipart
-jinja2
 pandas
-openpyxl
 requests
 python-dotenv
+openpyxl
+aiofiles
+python-multipart
