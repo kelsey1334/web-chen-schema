@@ -14,11 +14,15 @@
 </head>
 <body>
 <div class="container py-4">
-    <nav class="mb-4">
+<nav class="mb-4 d-flex justify-content-between">
+    <div>
+        <a href="/dashboard" class="btn btn-outline-dark me-2">Dashboard</a>
         <a href="/upload" class="btn btn-outline-primary me-2">Schema Tool</a>
         <a href="/crawl" class="btn btn-outline-success me-2">Crawl Tool</a>
-        <a href="/logout" class="btn btn-outline-secondary">Đăng xuất</a>
-    </nav>
+    </div>
+    <a href="/logout" class="btn btn-outline-secondary">Đăng xuất</a>
+</nav>
+
     <div class="card p-4">
         <h4 class="mb-3">Crawl thông tin từ danh sách URL</h4>
         <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end mb-3">
