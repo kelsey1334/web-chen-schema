@@ -1,13 +1,26 @@
+<!-- templates/login.html -->
 <!DOCTYPE html>
-<html>
-<head><title>Login</title></head>
-<body>
-  <h2>Đăng nhập</h2>
-  <form method="post">
-    <input type="text" name="username" placeholder="Tài khoản" required>
-    <input type="password" name="password" placeholder="Mật khẩu" required>
-    <button type="submit">Login</button>
-  </form>
-  <p style="color:red">{{ error }}</p>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Đăng nhập | Web Chèn Schema</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 min-h-screen flex items-center justify-center">
+    <div class="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-sm">
+        <div class="flex flex-col items-center mb-6">
+            <img src="https://cdn-icons-png.flaticon.com/512/1828/1828490.png" class="w-16 h-16 mb-2" alt="logo">
+            <h2 class="text-2xl font-bold mb-1">Đăng nhập quản trị</h2>
+            <p class="text-gray-400 text-sm">Nhập tài khoản để sử dụng hệ thống</p>
+        </div>
+        <form method="post" action="/login">
+            <input type="text" name="username" placeholder="Tên đăng nhập" class="w-full mb-4 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300" required>
+            <input type="password" name="password" placeholder="Mật khẩu" class="w-full mb-4 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300" required>
+            {% if error %}
+            <div class="bg-red-100 text-red-500 p-2 mb-4 rounded">{{ error }}</div>
+            {% endif %}
+            <button type="submit" class="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition">Đăng nhập</button>
+        </form>
+    </div>
 </body>
 </html>
