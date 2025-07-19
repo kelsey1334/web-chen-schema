@@ -8,4 +8,5 @@ aiofiles
 python-multipart
 itsdangerous
 jinja2
-starlette
+beautifulsoup4
+urllib3
