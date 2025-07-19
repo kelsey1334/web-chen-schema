@@ -280,7 +280,7 @@ def crawl_url(url):
 def home(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    return RedirectResponse("/upload")
+    return RedirectResponse("/dashboard")
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
@@ -290,7 +290,7 @@ def login_page(request: Request):
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     if username == USER and password == PASS:
         request.session["user"] = username
-        return RedirectResponse("/upload", status_code=302)
+        return RedirectResponse("/dashboard", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": "Sai tài khoản hoặc mật khẩu"})
 
 @app.get("/", response_class=HTMLResponse)
