@@ -11,8 +11,10 @@ from urllib.parse import urlparse
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
 from bs4 import BeautifulSoup
+import io
 import urllib3
 
+# Disable SSL warnings (not recommended for prod)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
@@ -20,15 +22,17 @@ USER = os.getenv("USER", "admin")
 PASS = os.getenv("PASS", "admin")
 SECRET_KEY = os.getenv("SECRET_KEY", "changeme")
 UPLOAD_DIR = "uploads"
+STATIC_DIR = "static"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs("static", exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# ====== Helper for schema ======
+
+# ====== Helper functions for schema ======
 def read_accounts_and_data(file_path):
     xls = pd.ExcelFile(file_path)
     sheet_names = [s.lower() for s in xls.sheet_names]
@@ -236,7 +240,7 @@ def process_excel_multi_account(file_path, action="chencode"):
     except Exception as e:
         return [f"🚫❌ Lỗi khi xử lý: {e}"], None
 
-# ======= Crawl OG Data ========
+# ========== Helper for CRAWL ==========
 def crawl_url(url):
     try:
         try:
@@ -271,11 +275,12 @@ def crawl_url(url):
         }
 
 # ========== ROUTES ==========
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    return RedirectResponse("/dashboard")
+    return RedirectResponse("/upload")
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
@@ -285,19 +290,13 @@ def login_page(request: Request):
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     if username == USER and password == PASS:
         request.session["user"] = username
-        return RedirectResponse("/dashboard", status_code=302)
+        return RedirectResponse("/upload", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": "Sai tài khoản hoặc mật khẩu"})
 
 @app.get("/logout", response_class=HTMLResponse)
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login")
-
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request):
-    if not request.session.get("user"):
-        return RedirectResponse("/login")
-    return templates.TemplateResponse("dashboard.html", {"request": request})
 
 @app.get("/upload", response_class=HTMLResponse)
 def upload_page(request: Request):
@@ -317,45 +316,56 @@ async def do_upload(request: Request, action: str = Form(...), file: UploadFile 
     # Copy file to static dir for download
     if out_file:
         import shutil
-        shutil.copy(out_file, os.path.join("static", os.path.basename(out_file)))
+        shutil.copy(out_file, os.path.join(STATIC_DIR, os.path.basename(out_file)))
     return templates.TemplateResponse(
         "upload.html", {"request": request, "logs": logs, "file_url": file_url}
     )
 
-@app.get("/crawl-url", response_class=HTMLResponse)
-def crawl_url_page(request: Request):
+@app.get("/crawl", response_class=HTMLResponse)
+def crawl_page(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    return templates.TemplateResponse("crawl.html", {"request": request, "logs": None, "file_url": None})
+    return templates.TemplateResponse("crawl.html", {"request": request, "result": None, "file_url": None, "error": None})
 
-@app.post("/crawl-url", response_class=HTMLResponse)
-async def do_crawl_url(request: Request, file: UploadFile = File(...)):
+@app.post("/crawl", response_class=HTMLResponse)
+async def do_crawl(request: Request, file: UploadFile = File(...)):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    temp_file = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}")
-    with open(temp_file, "wb") as f:
-        f.write(await file.read())
-    df = pd.read_excel(temp_file)
-    if "URL" not in df.columns:
-        return templates.TemplateResponse("crawl.html", {"request": request, "logs": ["File thiếu cột URL"], "file_url": None})
-    urls = df["URL"].dropna().tolist()
-    logs = []
-    result = []
-    for idx, url in enumerate(urls, 1):
-        data = crawl_url(str(url).strip())
-        logs.append(f"Đã crawl {idx}/{len(urls)}: {url}")
-        result.append(data)
-    result_df = pd.DataFrame(result)
-    output = os.path.join(UPLOAD_DIR, f"crawl_result_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx")
-    result_df.to_excel(output, index=False)
-    import shutil
-    shutil.copy(output, os.path.join("static", os.path.basename(output)))
-    file_url = f"/static/{os.path.basename(output)}"
-    return templates.TemplateResponse(
-        "crawl.html", {"request": request, "logs": logs, "file_url": file_url}
-    )
+    try:
+        df = pd.read_excel(io.BytesIO(await file.read()))
+        if "URL" not in df.columns:
+            return templates.TemplateResponse(
+                "crawl.html", {"request": request, "result": None, "file_url": None, "error": "File phải có cột tên 'URL'!"}
+            )
+        urls = df["URL"].dropna().tolist()
+        result = []
+        for url in urls:
+            data = crawl_url(str(url).strip())
+            result.append(data)
+        result_df = pd.DataFrame(result)
+        output = io.BytesIO()
+        result_df.to_excel(output, index=False)
+        output.seek(0)
+        # Lưu file để có link download
+        save_name = f"crawl_result_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx"
+        out_path = os.path.join(STATIC_DIR, save_name)
+        with open(out_path, "wb") as f:
+            f.write(output.read())
+        output.seek(0)
+        return templates.TemplateResponse(
+            "crawl.html", {
+                "request": request,
+                "result": result,
+                "file_url": f"/static/{save_name}",
+                "error": None
+            }
+        )
+    except Exception as e:
+        return templates.TemplateResponse(
+            "crawl.html", {"request": request, "result": None, "file_url": None, "error": f"Lỗi: {e}"}
+        )
 
-# Chạy uvicorn khi chạy python main.py
+# Run with: uvicorn main:app --host 0.0.0.0 --port 8080
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=8080)
