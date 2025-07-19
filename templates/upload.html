@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Upload File</title>
+</head>
+<body>
+  <h2>Chèn/Xoá Schema (Multi-site)</h2>
+  <form method="post" enctype="multipart/form-data">
+    <input type="file" name="file" required>
+    <select name="action">
+      <option value="chencode">Chèn script</option>
+      <option value="xoascript">Xoá script</option>
+    </select>
+    <button type="submit">Gửi file & Xử lý</button>
+  </form>
+  {% if logs %}
+    <h3>Log xử lý</h3>
+    <div style="white-space: pre-wrap; border:1px solid #ccc; padding:10px;">
+      {% for log in logs %}
+        {{ log }}<br>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% if file_url %}
+    <h4><a href="{{ file_url }}">Tải kết quả Excel</a></h4>
+  {% endif %}
+  <a href="/logout">Đăng xuất</a>
+</body>
+</html>
