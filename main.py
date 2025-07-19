@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
+from bs4 import BeautifulSoup
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
 USER = os.getenv("USER", "admin")
@@ -24,7 +28,7 @@ app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# ====== Helper functions ======
+# ====== Helper for schema ======
 def read_accounts_and_data(file_path):
     xls = pd.ExcelFile(file_path)
     sheet_names = [s.lower() for s in xls.sheet_names]
@@ -232,12 +236,46 @@ def process_excel_multi_account(file_path, action="chencode"):
     except Exception as e:
         return [f"🚫❌ Lỗi khi xử lý: {e}"], None
 
+# ======= Crawl OG Data ========
+def crawl_url(url):
+    try:
+        try:
+            res = requests.get(url, timeout=10)
+        except requests.exceptions.SSLError:
+            res = requests.get(url, timeout=10, verify=False)
+        soup = BeautifulSoup(res.text, "html.parser")
+        title = soup.find("meta", property="og:title")
+        desc = soup.find("meta", property="og:description")
+        image = soup.find("meta", property="og:image") or soup.find("meta", property="og:image:secure_url")
+        entry_date = soup.find("time", class_="entry-date published updated")
+        updated_time = soup.find("meta", property="og:updated_time")
+        date = None
+        if entry_date:
+            date = entry_date.get("datetime") or entry_date.text
+        elif updated_time:
+            date = updated_time.get("content")
+        return {
+            "URL": url,
+            "Title": title["content"] if title and "content" in title.attrs else "",
+            "Description": desc["content"] if desc and "content" in desc.attrs else "",
+            "Date": date or "",
+            "Image": image["content"] if image and "content" in image.attrs else ""
+        }
+    except Exception:
+        return {
+            "URL": url,
+            "Title": "",
+            "Description": "",
+            "Date": "",
+            "Image": ""
+        }
+
 # ========== ROUTES ==========
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    return RedirectResponse("/upload")
+    return RedirectResponse("/dashboard")
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
@@ -247,13 +285,19 @@ def login_page(request: Request):
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
     if username == USER and password == PASS:
         request.session["user"] = username
-        return RedirectResponse("/upload", status_code=302)
+        return RedirectResponse("/dashboard", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": "Sai tài khoản hoặc mật khẩu"})
 
 @app.get("/logout", response_class=HTMLResponse)
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login")
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/login")
+    return templates.TemplateResponse("dashboard.html", {"request": request})
 
 @app.get("/upload", response_class=HTMLResponse)
 def upload_page(request: Request):
@@ -278,7 +322,38 @@ async def do_upload(request: Request, action: str = Form(...), file: UploadFile 
         "upload.html", {"request": request, "logs": logs, "file_url": file_url}
     )
 
-# ========== END ==========
+@app.get("/crawl-url", response_class=HTMLResponse)
+def crawl_url_page(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/login")
+    return templates.TemplateResponse("crawl.html", {"request": request, "logs": None, "file_url": None})
+
+@app.post("/crawl-url", response_class=HTMLResponse)
+async def do_crawl_url(request: Request, file: UploadFile = File(...)):
+    if not request.session.get("user"):
+        return RedirectResponse("/login")
+    temp_file = os.path.join(UPLOAD_DIR, f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}")
+    with open(temp_file, "wb") as f:
+        f.write(await file.read())
+    df = pd.read_excel(temp_file)
+    if "URL" not in df.columns:
+        return templates.TemplateResponse("crawl.html", {"request": request, "logs": ["File thiếu cột URL"], "file_url": None})
+    urls = df["URL"].dropna().tolist()
+    logs = []
+    result = []
+    for idx, url in enumerate(urls, 1):
+        data = crawl_url(str(url).strip())
+        logs.append(f"Đã crawl {idx}/{len(urls)}: {url}")
+        result.append(data)
+    result_df = pd.DataFrame(result)
+    output = os.path.join(UPLOAD_DIR, f"crawl_result_{datetime.now().strftime('%Y%m%d%H%M%S')}.xlsx")
+    result_df.to_excel(output, index=False)
+    import shutil
+    shutil.copy(output, os.path.join("static", os.path.basename(output)))
+    file_url = f"/static/{os.path.basename(output)}"
+    return templates.TemplateResponse(
+        "crawl.html", {"request": request, "logs": logs, "file_url": file_url}
+    )
 
 # Chạy uvicorn khi chạy python main.py
 if __name__ == "__main__":
