@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Crawl OG Data | Admin Schema Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #f8fafc; min-height:100vh; }
+        .container { max-width: 720px;}
+        .nav-brand { color: #1e40af; font-weight: bold; font-size: 1.3rem;}
+        .card { border-radius: 1.2rem; box-shadow: 0 2px 18px rgba(30,41,59,0.08);}
+        .form-control { border-radius: .7rem;}
+        .table { background: #fff;}
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-light px-4" style="background:#fff;">
+        <span class="nav-brand">Admin Schema Tool</span>
+        <a href="/dashboard" class="btn btn-outline-secondary btn-sm ms-auto me-2">Dashboard</a>
+        <a href="/logout" class="btn btn-link btn-sm">Đăng xuất</a>
+    </nav>
+    <div class="container py-4">
+        <div class="card p-4">
+            <h4 class="fw-bold mb-3" style="color:#059669">Crawl OG Data từ URL</h4>
+            <form method="post" enctype="multipart/form-data" class="row g-3">
+                <div class="col-md-10">
+                    <label class="form-label">Chọn file Excel (.xlsx) có cột "URL"</label>
+                    <input type="file" name="file" accept=".xlsx" required class="form-control">
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-success w-100" type="submit">Crawl</button>
+                </div>
+            </form>
+            <div class="mt-4">
+                {% if logs %}
+                    <div class="alert alert-info py-2 mb-2">Log tiến trình:</div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered align-middle">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Log</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% for i, log in enumerate(logs, 1) %}
+                                <tr>
+                                    <td>{{ i }}</td>
+                                    <td style="font-size:.97rem;">{{ log }}</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% endif %}
+                {% if file_url %}
+                    <div class="alert alert-success mt-3">
+                        <a href="{{ file_url }}" class="btn btn-success">Tải file kết quả</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        <div class="text-end mt-3">
+            <a href="https://schema-excel-mau.site/crawl-mau.xlsx" target="_blank" class="btn btn-link btn-sm" style="color:#64748b">Tải file mẫu</a>
+        </div>
+    </div>
+</body>
+</html>
